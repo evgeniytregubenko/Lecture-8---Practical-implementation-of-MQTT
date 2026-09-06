@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "ESP32-A-Sensor",
+			"path": "ESP32-A-Sensor"
+		},
+		{
+			"name": "ESP32-B-Actuator",
+			"path": "ESP32-B-Actuator"
+		}
+	],
+	"settings": {}
+}
