@@ -7,6 +7,9 @@
 		{
 			"name": "ESP32-B-Actuator",
 			"path": "ESP32-B-Actuator"
+		},
+		{
+			"path": "."
 		}
 	],
 	"settings": {}
