@@ -467,25 +467,36 @@ ESP32-B підключився знову → online
 # Архітектура системи
 
 ```text
-                  broker.hivemq.com
-                         │
-                  MQTT Broker
-                         │
-             ┌───────────┴───────────┐
-             │                       │
-             │                       │
-        ESP32-A                  ESP32-B
-        SENSOR                   ACTUATOR
-             │                       │
-       ┌─────┴─────┐                 │
-       │           │                 │
-     DHT22       Button             LED
-       │           │                 │
-       │           │                 │
- temperature   manual_read       ON / OFF
- humidity          │                 │
-       │           │                 │
-       └────────── MQTT ─────────────┘
+                         broker.hivemq.com
+                           MQTT Broker
+                               ▲   ▲
+                               │   │
+              ┌────────────────┘   └────────────────┐
+              │                                     │
+              │ MQTT                           MQTT │
+              │                                     │
+           ESP32-A                               ESP32-B
+            SENSOR                               ACTUATOR
+              │                                     │
+        ┌─────┴─────┐                               │
+        │           │                               │
+      DHT22       Button                           LED
+        │           │                               │
+ temperature    manual_read                     ON / OFF
+ humidity
+
+ESP32-A → Broker:
+  sensors/temperature
+  sensors/humidity
+  commands
+
+Broker → ESP32-B:
+  sensors/temperature
+  commands
+
+ESP32-B → Broker:
+  actuators/led
+  status
 ```
 
 ESP32-A не знає про існування ESP32-B.
