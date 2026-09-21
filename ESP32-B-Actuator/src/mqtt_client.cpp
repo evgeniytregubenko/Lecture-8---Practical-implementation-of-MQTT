@@ -51,6 +51,13 @@ WiFiClient wifiClient; // TCP-клієнт для мережевого з'єдн
 PubSubClient mqttClient(wifiClient); // MQTT-клієнт, який використовує TCP-з'єднання wifiClient
 
 // ============================================================
+// ВНУТРІШНІ ФУНКЦІЇ MQTT
+// ============================================================
+
+static void mqttCallback(char* topic, byte* payload, unsigned int length);
+static void subscribeMQTTTopics();
+
+// ============================================================
 // ЗМІННІ ДЛЯ ПОВТОРНОГО ПІДКЛЮЧЕННЯ MQTT
 // ============================================================
 
@@ -72,7 +79,7 @@ static bool manualReadReceived = false;        // Ознака отриманн�
 // ОБРОБКА ВХІДНИХ MQTT-ПОВІДОМЛЕНЬ
 // ============================================================
 
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
+static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     char message[32]; // Буфер для перетворення payload у C-рядок
 
@@ -112,10 +119,55 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 // ============================================================
+// ПІДКЛЮЧЕННЯ ДО MQTT
+// ============================================================
+
+bool connectMQTT() {
+
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT); // Адреса та порт MQTT-брокера
+
+    mqttClient.setCallback(mqttCallback); // Реєстрація callback-функції
+
+    mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC); // Інтервал MQTT Keep Alive
+
+    mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_SEC); // Таймаут мережевого сокета
+
+    Serial.println("Connecting to MQTT broker...");
+
+    if (mqttClient.connect(
+        MQTT_CLIENT_ID,     // Client ID
+        MQTT_TOPIC_STATUS,  // Last Will topic
+        0,                  // Last Will QoS
+        true,               // Retain
+        "offline"           // Last Will message
+    )) {
+
+    Serial.println("MQTT connected");
+
+    subscribeMQTTTopics();
+
+    mqttClient.publish( // Публікуємо поточний стан пристрою
+        MQTT_TOPIC_STATUS,
+        "online",
+        true
+    );
+
+    Serial.println("Status published: online");
+
+    return true;
+}
+
+    Serial.print("MQTT connection failed, state: ");
+    Serial.println(mqttClient.state());
+
+    return false;
+}
+
+// ============================================================
 // ПІДПИСКА НА MQTT-ТОПІКИ
 // ============================================================
 
-void subscribeMQTTTopics() {
+static void subscribeMQTTTopics() {
 
     if (mqttClient.subscribe(MQTT_TOPIC_TEMPERATURE, 1)) { // Підписка на температуру з QoS 1
 
@@ -178,16 +230,30 @@ void mqttLoop() {
     Serial.print("/");
     Serial.println(MQTT_MAX_RETRIES);
 
-    if (mqttClient.connect(MQTT_CLIENT_ID)) { // Спроба повторного підключення
+    if (mqttClient.connect( // Спроба повторного підключення з Last Will
+        MQTT_CLIENT_ID,
+        MQTT_TOPIC_STATUS,
+        0,
+        true,
+        "offline"
+    )) {
 
-        Serial.println("MQTT reconnected");
+    Serial.println("MQTT reconnected");   
 
-        mqttReconnectAttempts = 0;
+    mqttReconnectAttempts = 0;
 
-        subscribeMQTTTopics(); // Після reconnect необхідно знову підписатися на топіки
+    subscribeMQTTTopics(); // Після reconnect необхідно знову підписатися на топіки
 
-        return;
-    }
+    mqttClient.publish( // Публікуємо поточний стан пристрою
+        MQTT_TOPIC_STATUS,
+        "online",
+        true
+    );
+
+    Serial.println("Status published: online");
+
+    return;
+}
 
     Serial.print("MQTT reconnect failed, state: ");
     Serial.println(mqttClient.state());
@@ -225,4 +291,46 @@ bool getManualReadCommand() {
     manualReadReceived = false; // Скидаємо прапорець після обробки команди
 
     return true;
+}
+
+// ============================================================
+// ПУБЛІКАЦІЯ СТАНУ LED
+// ============================================================
+
+bool publishLEDState(bool state) {
+
+    if (!mqttClient.connected()) {
+
+        Serial.println("MQTT not connected");
+
+        return false;
+    }
+
+    const char* message;
+
+    if (state) {
+
+        message = "ON";
+
+    } else {
+
+        message = "OFF";
+    }
+
+    bool published = mqttClient.publish(
+        MQTT_TOPIC_LED,
+        message
+    );
+
+    if (published) {
+
+        Serial.print("LED state published: ");
+        Serial.println(message);
+
+        return true;
+    }
+
+    Serial.println("LED state publish failed");
+
+    return false;
 }

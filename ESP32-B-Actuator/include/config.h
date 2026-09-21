@@ -48,4 +48,5 @@
 #define MQTT_TOPIC_TEMPERATURE "iot-course/Tregubenko/sensors/temperature" // Топік для отримання температури
 #define MQTT_TOPIC_COMMANDS    "iot-course/Tregubenko/commands"            // Топік для отримання команд від користувача
 #define MQTT_TOPIC_LED "iot-course/Tregubenko/actuators/led"               // Топік для публікації стану світлодіода
+#define MQTT_TOPIC_STATUS "iot-course/Tregubenko/status"                   // Топік стану ESP32-B
 
