@@ -25,8 +25,9 @@
 
 #define MQTT_RETRY_DELAY  5000 // Інтервал між спробами reconnect, мс
 #define MQTT_MAX_RETRIES  3    // Максимальна кількість спроб reconnect
-#define MQTT_KEEP_ALIVE 60      // Інтервал keep-alive, сек
-#define MQTT_SOCKET_TIME_OUT 30 // Таймаут сокета, сек
+
+#define MQTT_KEEPALIVE_SEC      60 // Інтервал keep-alive в секундах
+#define MQTT_SOCKET_TIMEOUT_SEC 30 // Таймаут сокета в секундах
 
 // ============================================================
 // MQTT ТОПІКИ

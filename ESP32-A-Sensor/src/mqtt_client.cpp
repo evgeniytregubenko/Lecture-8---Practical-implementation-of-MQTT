@@ -38,8 +38,7 @@ bool connectWiFi() {
 
     while (WiFi.status() != WL_CONNECTED) {
 
-        // Перевірка таймауту підключення
-        if ((millis() - startTime) >= WIFI_TIMEOUT) {
+        if ((millis() - startTime) >= WIFI_TIMEOUT) { // Перевірка таймауту підключення
 
             Serial.println();
             Serial.println("Wi-Fi connection failed");
@@ -67,8 +66,8 @@ bool connectWiFi() {
 bool connectMQTT() {
 
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT); // Встановлення адреси та порту MQTT-брокера
-    mqttClient.setKeepAlive(MQTT_KEEP_ALIVE); // Встановлення інтервалу keep-alive
-    mqttClient.setSocketTimeout(MQTT_SOCKET_TIME_OUT); // Встановлення таймауту сокета в секундах
+    mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC); // Встановлення інтервалу keep-alive
+    mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_SEC); // Встановлення таймауту сокета в секундах
 
     Serial.println("Connecting to MQTT broker...");
 
