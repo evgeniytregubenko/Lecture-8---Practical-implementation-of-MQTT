@@ -818,7 +818,7 @@ MQTT connection failed, state: -2
 
 ### Результат тесту ESP32-A
 
-![ESP32-A MQTT reconnect cycle test](images/mqtt-reconnect-cycle-test.png)
+![ESP32-A MQTT reconnect cycle test](images/esp32-a-mqtt-reconnect-cycle-test.png)
 
 Тест підтверджує, що після трьох невдалих спроб ESP32-A не припиняє роботу механізму reconnect, а через 60 секунд починає новий цикл.
 
