@@ -4,7 +4,7 @@
 #include "button.h"
 
 // ============================================================
-// ЗМІННІ СТАНУ КНОПКИ
+// ЗМІННІ КНОПКИ MANUAL READ
 // ============================================================
 
 // static зберігає значення змінної між викликами функції.
@@ -18,7 +18,16 @@ static bool buttonState = HIGH;     // Підтверджений стан кн�
 static unsigned long lastDebounceTime = 0; // Час останньої зміни стану входу
 
 // ============================================================
-// ІНІЦІАЛІЗАЦІЯ КНОПКИ
+// ЗМІННІ КНОПКИ WI-FI RESET
+// ============================================================
+
+static bool lastWiFiDisconnectButtonState = HIGH;
+static bool wifiDisconnectButtonState = HIGH;
+
+static unsigned long lastWiFiDisconnectDebounceTime = 0;
+
+// ============================================================
+// ІНІЦІАЛІЗАЦІЯ КНОПОК
 // ============================================================
 
 void initButton() {
@@ -28,8 +37,15 @@ void initButton() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
 }
 
+void initWiFiDisconnectButton() {
+
+    // Кнопка підключена між GPIO та GND,
+    // тому використовуємо внутрішній підтягуючий резистор
+    pinMode(WIFI_DISCONNECT_PIN, INPUT_PULLUP);
+}
+
 // ============================================================
-// ОБРОБКА НАТИСКАННЯ КНОПКИ
+// ОБРОБКА НАТИСКАННЯ КНОПКИ MANUAL READ
 // ============================================================
 
 bool isButtonPressed() {
@@ -59,4 +75,37 @@ bool isButtonPressed() {
     lastButtonState = reading; // Запам'ятовуємо стан для наступного виклику
 
     return false; // Нового натискання немає
+}
+
+// ============================================================
+// ОБРОБКА КНОПКИ WI-FI DISCONNECT
+// ============================================================
+
+bool isWiFiDisconnectButtonPressed() {
+
+    bool reading = digitalRead(WIFI_DISCONNECT_PIN);
+
+    if (reading != lastWiFiDisconnectButtonState) {
+
+        lastWiFiDisconnectDebounceTime = millis();
+    }
+
+    if ((millis() - lastWiFiDisconnectDebounceTime) > DEBOUNCE_DELAY) {
+
+        if (reading != wifiDisconnectButtonState) {
+
+            wifiDisconnectButtonState = reading;
+
+            if (wifiDisconnectButtonState == LOW) {
+
+                lastWiFiDisconnectButtonState = reading;
+
+                return true;
+            }
+        }
+    }
+
+    lastWiFiDisconnectButtonState = reading;
+
+    return false;
 }

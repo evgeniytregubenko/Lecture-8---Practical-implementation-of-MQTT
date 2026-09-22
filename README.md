@@ -537,3 +537,498 @@ ESP32-B не звертається безпосередньо до ESP32-A.
 - [x] MQTT status `online/offline`;
 - [x] retained status;
 - [x] Last Will and Testament.
+
+---
+
+# Виправлення після перевірки домашнього завдання
+
+Після перевірки домашнього завдання було внесено додаткові зміни до логіки ініціалізації та автоматичного відновлення мережевих з'єднань **ESP32-A** та **ESP32-B**.
+
+Основні зміни:
+
+- додано автоматичне відновлення Wi-Fi-з'єднання;
+- конфігурацію MQTT-клієнта винесено в окрему функцію `initMQTT()`;
+- змінено алгоритм MQTT reconnect після трьох невдалих спроб;
+- після паузи автоматично запускається новий цикл MQTT reconnect;
+- усунено дублювання процедури MQTT-підключення в ESP32-B;
+- виконано окремі тести відновлення Wi-Fi та MQTT-з'єднання у Wokwi.
+
+---
+
+## 1. Автоматичне відновлення Wi-Fi-з'єднання
+
+Для **ESP32-A** та **ESP32-B** додано окрему неблокуючу функцію обслуговування Wi-Fi-з'єднання:
+
+```cpp
+wifiLoop();
+```
+
+Функція викликається з основного `loop()` перед обслуговуванням MQTT:
+
+```cpp
+void loop() {
+
+    wifiLoop(); // Обслуговування Wi-Fi-з'єднання
+
+    mqttLoop(); // Обслуговування MQTT-з'єднання
+
+    // ...
+}
+```
+
+Якщо Wi-Fi-з'єднання втрачено:
+
+- основний цикл програми продовжує виконуватися;
+- кожні **5 секунд** виконується спроба відновлення Wi-Fi;
+- використовується `WiFi.reconnect()`;
+- після фактичного відновлення з'єднання виводиться повідомлення `Wi-Fi reconnected`;
+- після відновлення Wi-Fi механізм MQTT reconnect автоматично відновлює MQTT-з'єднання.
+
+Параметр інтервалу reconnect винесено в `config.h`:
+
+```cpp
+#define WIFI_RETRY_DELAY 5000
+```
+
+### Тестове відключення Wi-Fi
+
+Для перевірки механізму Wi-Fi reconnect у **ESP32-A** додано окрему тестову кнопку `Wi-Fi Disconnect`.
+
+Кнопка виконує програмне відключення ESP32 від Wi-Fi:
+
+```cpp
+WiFi.disconnect();
+```
+
+Після цього `wifiLoop()` автоматично запускає процес відновлення з'єднання.
+
+Приклад Serial Monitor:
+
+```text
+Wi-Fi Disconnect button pressed
+TEST: Wi-Fi disconnect
+
+Wi-Fi reconnect attempt
+
+MQTT reconnect attempt 1/3
+Connecting to MQTT broker...
+MQTT connected
+
+Wi-Fi reconnected
+IP address: 10.13.37.2
+```
+
+Після відновлення Wi-Fi та MQTT ESP32-A продовжує звичайну публікацію даних DHT22:
+
+```text
+Published. Time: 50 s | Temperature: 24.00 C | Humidity: 40.00 %
+```
+
+### Результат тесту Wi-Fi reconnect
+
+![Wi-Fi reconnect cycle test](images/wifi-reconnect-cycle-test.png)
+
+Таким чином перевірено повний сценарій:
+
+```text
+Wi-Fi Disconnect
+        │
+        ▼
+Wi-Fi connection lost
+        │
+        ▼
+wifiLoop()
+        │
+        ▼
+WiFi.reconnect()
+        │
+        ▼
+Wi-Fi restored
+        │
+        ▼
+mqttLoop()
+        │
+        ▼
+MQTT reconnect
+        │
+        ▼
+Normal operation
+```
+
+Тестова кнопка `Wi-Fi Disconnect` використовується тільки для перевірки механізму відновлення Wi-Fi у Wokwi та не є частиною основної функціональності пристрою.
+
+---
+
+## 2. Ініціалізація MQTT незалежно від стану Wi-Fi
+
+Для **ESP32-A** та **ESP32-B** конфігурацію MQTT-клієнта винесено в окрему функцію:
+
+```cpp
+initMQTT();
+```
+
+Функція викликається під час `setup()` **до початкової спроби підключення до Wi-Fi**.
+
+Для ESP32-A:
+
+```cpp
+initSensors();
+
+initMQTT();
+
+if (!connectWiFi()) {
+    // ...
+}
+```
+
+Для ESP32-B:
+
+```cpp
+initActuator();
+
+initMQTT();
+
+if (!connectWiFi()) {
+    // ...
+}
+```
+
+Для обох пристроїв у `initMQTT()` налаштовуються:
+
+- адреса MQTT-брокера;
+- порт MQTT-брокера;
+- MQTT Keep Alive;
+- socket timeout.
+
+Для **ESP32-B** додатково реєструється MQTT callback-функція:
+
+```cpp
+mqttClient.setCallback(mqttCallback);
+```
+
+ESP32-A не потребує callback-функції, оскільки у поточній реалізації він тільки публікує MQTT-повідомлення.
+
+Завдяки окремій ініціалізації MQTT-клієнт налаштований незалежно від результату початкового підключення до Wi-Fi.
+
+Якщо Wi-Fi був недоступний під час запуску ESP32, але відновився пізніше, пристрій може коректно виконати MQTT-підключення через механізм reconnect.
+
+---
+
+## 3. Повторні цикли MQTT reconnect
+
+У початковій реалізації після трьох невдалих спроб підключення до MQTT-брокера нові спроби більше не виконувалися.
+
+У результаті, якщо MQTT-брокер залишався недоступним більше часу, пристрій не міг самостійно відновити MQTT-з'єднання після відновлення роботи брокера.
+
+Логіку reconnect змінено для **ESP32-A** та **ESP32-B**.
+
+Поточний алгоритм:
+
+```text
+MQTT connection lost
+        │
+        ▼
+Reconnect attempt 1/3
+        │
+      5 s
+        ▼
+Reconnect attempt 2/3
+        │
+      5 s
+        ▼
+Reconnect attempt 3/3
+        │
+        ▼
+Pause 60 s
+        │
+        ▼
+Reset attempts counter
+        │
+        ▼
+Start new reconnect cycle
+        │
+        ▼
+Reconnect attempt 1/3
+```
+
+Параметри винесено в `config.h`:
+
+```cpp
+#define MQTT_RETRY_DELAY       5000
+#define MQTT_MAX_RETRIES       3
+#define MQTT_RETRY_CYCLE_DELAY 60000
+```
+
+Таким чином:
+
+- між окремими спробами MQTT reconnect — **5 секунд**;
+- максимальна кількість спроб в одному циклі — **3**;
+- після трьох невдалих спроб — пауза **60 секунд**;
+- після паузи лічильник спроб скидається;
+- автоматично починається новий цикл із трьох спроб;
+- після успішного підключення лічильник спроб скидається.
+
+При вичерпанні трьох спроб:
+
+```text
+MQTT: 3 attempts failed, next cycle in 60 s
+```
+
+Через 60 секунд:
+
+```text
+MQTT: starting new reconnect cycle
+MQTT reconnect attempt 1/3
+```
+
+Таким чином пристрій не припиняє спроби відновлення MQTT-з'єднання назавжди навіть при тривалій недоступності брокера.
+
+---
+
+## 4. Перевірка MQTT reconnect — ESP32-A
+
+Для перевірки механізму reconnect у `config.h` ESP32-A було тимчасово вказано недоступну адресу MQTT-брокера.
+
+У Serial Monitor отримано:
+
+```text
+MQTT reconnect attempt 1/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+
+MQTT reconnect attempt 2/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+
+MQTT reconnect attempt 3/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+
+MQTT: 3 attempts failed, next cycle in 60 s
+```
+
+Після паузи:
+
+```text
+MQTT: starting new reconnect cycle
+MQTT reconnect attempt 1/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+```
+
+### Результат тесту ESP32-A
+
+![ESP32-A MQTT reconnect cycle test](images/mqtt-reconnect-cycle-test.png)
+
+Тест підтверджує, що після трьох невдалих спроб ESP32-A не припиняє роботу механізму reconnect, а через 60 секунд починає новий цикл.
+
+Після завершення тесту в конфігурації було повернуто робочу адресу брокера:
+
+```cpp
+#define MQTT_BROKER "broker.hivemq.com"
+```
+
+---
+
+## 5. Перевірка MQTT reconnect — ESP32-B
+
+Аналогічний тест виконано для **ESP32-B**.
+
+Для тестування також було тимчасово вказано недоступну адресу MQTT-брокера.
+
+У Serial Monitor:
+
+```text
+MQTT reconnect attempt 1/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+
+MQTT reconnect attempt 2/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+
+MQTT reconnect attempt 3/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+
+MQTT: 3 attempts failed, next cycle in 60 s
+```
+
+Після 60-секундної паузи:
+
+```text
+MQTT: starting new reconnect cycle
+
+MQTT reconnect attempt 1/3
+Connecting to MQTT broker...
+MQTT connection failed, state: -2
+```
+
+### Результат тесту ESP32-B
+
+![ESP32-B MQTT reconnect cycle test](images/esp32-b-mqtt-reconnect-cycle-test.png)
+
+Таким чином для ESP32-B також підтверджено роботу повторних циклів MQTT reconnect.
+
+Після завершення тесту повернуто робочу адресу MQTT-брокера:
+
+```cpp
+#define MQTT_BROKER "broker.hivemq.com"
+```
+
+---
+
+## 6. Усунення дублювання MQTT reconnect у ESP32-B
+
+У початковій реалізації ESP32-B процедура MQTT-підключення частково дублювалася у функціях:
+
+```cpp
+connectMQTT();
+```
+
+та:
+
+```cpp
+mqttLoop();
+```
+
+Окремо виконувалися:
+
+- `mqttClient.connect()`;
+- налаштування Last Will;
+- повторна підписка на топіки;
+- публікація статусу `online`.
+
+Після виправлення вся процедура встановлення MQTT-з'єднання зосереджена у функції:
+
+```cpp
+connectMQTT();
+```
+
+Функція виконує підключення з Last Will:
+
+```text
+Topic:
+iot-course/Tregubenko/status
+
+Payload:
+offline
+
+Retain:
+true
+```
+
+Після успішного підключення ESP32-B:
+
+1. підписується на:
+
+```text
+iot-course/Tregubenko/sensors/temperature
+```
+
+з **QoS 1**;
+
+2. підписується на:
+
+```text
+iot-course/Tregubenko/commands
+```
+
+з **QoS 0**;
+
+3. публікує retained-статус:
+
+```text
+online
+```
+
+Функція `mqttLoop()` більше не дублює процедуру підключення.
+
+При необхідності reconnect вона викликає:
+
+```cpp
+if (connectMQTT()) {
+
+    mqttReconnectAttempts = 0;
+    mqttRetryCyclePaused = false;
+
+    return;
+}
+```
+
+Таким чином одна й та сама функція використовується як для початкового MQTT-підключення, так і для повторного підключення.
+
+Це також гарантує, що після кожного успішного reconnect ESP32-B повторно виконає необхідні MQTT-підписки.
+
+---
+
+## 7. Підсумкова логіка відновлення з'єднань
+
+Після внесених змін відновлення мережевого з'єднання виконується на двох рівнях:
+
+```text
+                ESP32-A / ESP32-B
+                       │
+                       ▼
+                Wi-Fi connected?
+                  │          │
+                 YES         NO
+                  │          │
+                  │          ▼
+                  │     wifiLoop()
+                  │          │
+                  │     reconnect 5 s
+                  │          │
+                  └────◄─────┘
+                       │
+                       ▼
+                MQTT connected?
+                  │          │
+                 YES         NO
+                  │          │
+                  │          ▼
+                  │     mqttLoop()
+                  │          │
+                  │      attempt 1/3
+                  │          │
+                  │      attempt 2/3
+                  │          │
+                  │      attempt 3/3
+                  │          │
+                  │       pause 60 s
+                  │          │
+                  │       new cycle
+                  │          │
+                  └────◄─────┘
+                       │
+                       ▼
+                Normal operation
+```
+
+Wi-Fi та MQTT reconnect реалізовані без блокуючих циклів у `loop()`.
+
+Це дозволяє основній логіці пристрою продовжувати роботу під час очікування наступної спроби відновлення з'єднання.
+
+---
+
+## Результат виправлень
+
+Після внесення змін та повторного тестування:
+
+- [x] MQTT-клієнт ESP32-A ініціалізується незалежно від початкового стану Wi-Fi;
+- [x] MQTT-клієнт ESP32-B ініціалізується незалежно від початкового стану Wi-Fi;
+- [x] ESP32-A автоматично відновлює Wi-Fi-з'єднання;
+- [x] ESP32-B автоматично відновлює Wi-Fi-з'єднання;
+- [x] інтервал між спробами Wi-Fi reconnect — 5 секунд;
+- [x] MQTT reconnect виконується циклами максимум по 3 спроби;
+- [x] інтервал між MQTT reconnect-спробами — 5 секунд;
+- [x] після 3 невдалих MQTT-спроб виконується пауза 60 секунд;
+- [x] після паузи автоматично починається новий цикл MQTT reconnect;
+- [x] після успішного reconnect лічильник MQTT-спроб скидається;
+- [x] ESP32-B після reconnect повторно підписується на MQTT-топіки;
+- [x] ESP32-B зберігає підписку на температуру з QoS 1;
+- [x] ESP32-B після reconnect повторно публікує retained-статус `online`;
+- [x] для ESP32-B зберігається Last Will `offline`;
+- [x] усунено дублювання процедури MQTT-підключення ESP32-B;
+- [x] Wi-Fi reconnect перевірено у Wokwi;
+- [x] повторні цикли MQTT reconnect перевірено окремо для ESP32-A та ESP32-B.

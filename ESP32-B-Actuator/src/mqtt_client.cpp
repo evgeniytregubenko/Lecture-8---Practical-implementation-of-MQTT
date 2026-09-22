@@ -5,42 +5,6 @@
 #include "config.h"
 #include "mqtt_client.h"
 
-// ============================================================
-// ПІДКЛЮЧЕННЯ ДО WI-FI
-// ============================================================
-
-bool connectWiFi() {
-
-    Serial.print("Connecting to Wi-Fi: ");
-    Serial.println(WIFI_SSID);
-
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    unsigned long startTime = millis();
-
-    while (WiFi.status() != WL_CONNECTED) {
-
-        if ((millis() - startTime) >= WIFI_TIMEOUT) { // Перевірка таймауту підключення
-
-            Serial.println();
-            Serial.println("Wi-Fi connection failed");
-
-            return false;
-        }
-
-        delay(250);
-        Serial.print(".");
-    }
-
-    Serial.println();
-    Serial.println("Wi-Fi connected");
-
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-
-    return true;
-}
-
 
 // ============================================================
 // MQTT КЛІЄНТ
@@ -58,6 +22,21 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length);
 static void subscribeMQTTTopics();
 
 // ============================================================
+// КОНФІГУРАЦІЯ MQTT-КЛІЄНТА
+// ============================================================
+
+void initMQTT() {
+
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT); // Адреса та порт MQTT-брокера
+
+    mqttClient.setCallback(mqttCallback); // Реєстрація callback-функції
+
+    mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC); // Інтервал MQTT Keep Alive
+
+    mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_SEC); // Таймаут мережевого сокета
+}
+
+// ============================================================
 // ЗМІННІ ДЛЯ ПОВТОРНОГО ПІДКЛЮЧЕННЯ MQTT
 // ============================================================
 
@@ -65,7 +44,20 @@ static void subscribeMQTTTopics();
 // та обмежує їх видимість поточним файлом mqtt_client.cpp
 
 static unsigned long lastMQTTReconnectTime = 0; // Час останньої спроби підключення
-static uint8_t mqttReconnectAttempts = 0;       // Кількість спроб повторного підключення
+
+static uint8_t mqttReconnectAttempts = 0; // Кількість спроб у поточному циклі
+
+static unsigned long mqttRetryCycleStartTime = 0; // Час початку паузи між циклами
+
+static bool mqttRetryCyclePaused = false; // Ознака паузи після 3 невдалих спроб
+
+// ============================================================
+// ЗМІННІ ДЛЯ ПОВТОРНОГО ПІДКЛЮЧЕННЯ WI-FI
+// ============================================================
+
+static unsigned long lastWiFiReconnectTime = 0; // Час останньої спроби підключення Wi-Fi
+
+static bool wifiReconnectInProgress = false; // Ознака процесу відновлення Wi-Fi
 
 // ============================================================
 // ОТРИМАНІ ДАНІ MQTT
@@ -124,14 +116,6 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
 bool connectMQTT() {
 
-    mqttClient.setServer(MQTT_BROKER, MQTT_PORT); // Адреса та порт MQTT-брокера
-
-    mqttClient.setCallback(mqttCallback); // Реєстрація callback-функції
-
-    mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC); // Інтервал MQTT Keep Alive
-
-    mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_SEC); // Таймаут мережевого сокета
-
     Serial.println("Connecting to MQTT broker...");
 
     if (mqttClient.connect(
@@ -142,20 +126,20 @@ bool connectMQTT() {
         "offline"           // Last Will message
     )) {
 
-    Serial.println("MQTT connected");
+        Serial.println("MQTT connected");
 
-    subscribeMQTTTopics();
+        subscribeMQTTTopics(); // Після підключення підписуємося на топіки
 
-    mqttClient.publish( // Публікуємо поточний стан пристрою
-        MQTT_TOPIC_STATUS,
-        "online",
-        true
-    );
+        mqttClient.publish( // Публікуємо поточний стан пристрою
+            MQTT_TOPIC_STATUS,
+            "online",
+            true
+        );
 
-    Serial.println("Status published: online");
+        Serial.println("Status published: online");
 
-    return true;
-}
+        return true;
+    }
 
     Serial.print("MQTT connection failed, state: ");
     Serial.println(mqttClient.state());
@@ -195,71 +179,157 @@ static void subscribeMQTTTopics() {
 
 void mqttLoop() {
 
-    if (WiFi.status() != WL_CONNECTED) { // Якщо Wi-Fi не підключений, повторне підключення до MQTT неможливе
+    if (WiFi.status() != WL_CONNECTED) { // Якщо Wi-Fi не підключений, MQTT reconnect неможливий
 
         return;
     }
 
     if (mqttClient.connected()) { // Якщо MQTT підключений
 
-        mqttReconnectAttempts = 0; // Скидаємо лічильник спроб
+        mqttReconnectAttempts = 0;
+        mqttRetryCyclePaused = false;
 
-        mqttClient.loop(); // Обслуговування MQTT-з'єднання та вхідних повідомлень
-
-        return;
-    }
-
-    if (mqttReconnectAttempts >= MQTT_MAX_RETRIES) { // Якщо вже виконано максимальну кількість спроб
+        mqttClient.loop(); // Обслуговування MQTT та вхідних повідомлень
 
         return;
     }
 
     unsigned long currentTime = millis();
 
-    if ((currentTime - lastMQTTReconnectTime) < MQTT_RETRY_DELAY) { // Перевіряємо, чи минув інтервал між спробами reconnect
+    // ========================================================
+    // ПАУЗА МІЖ ЦИКЛАМИ RECONNECT
+    // ========================================================
+
+    if (mqttRetryCyclePaused) {
+
+        if ((currentTime - mqttRetryCycleStartTime) < MQTT_RETRY_CYCLE_DELAY) { // Після трьох невдалих спроб очікуємо 60 секунд
+
+            return;
+        }
+
+        Serial.println("MQTT: starting new reconnect cycle");
+
+        mqttReconnectAttempts = 0;
+        mqttRetryCyclePaused = false;
+    }
+
+    // ========================================================
+    // ІНТЕРВАЛ МІЖ СПРОБАМИ
+    // ========================================================
+
+    if ((currentTime - lastMQTTReconnectTime) < MQTT_RETRY_DELAY) {
 
         return;
     }
 
-    lastMQTTReconnectTime = currentTime; // Запам'ятовуємо час поточної спроби
+    lastMQTTReconnectTime = currentTime;
 
-    mqttReconnectAttempts++; // Збільшуємо лічильник спроб
+    mqttReconnectAttempts++;
 
     Serial.print("MQTT reconnect attempt ");
     Serial.print(mqttReconnectAttempts);
     Serial.print("/");
     Serial.println(MQTT_MAX_RETRIES);
 
-    if (mqttClient.connect( // Спроба повторного підключення з Last Will
-        MQTT_CLIENT_ID,
-        MQTT_TOPIC_STATUS,
-        0,
-        true,
-        "offline"
-    )) {
+    // ========================================================
+    // СПРОБА ПОВТОРНОГО ПІДКЛЮЧЕННЯ
+    // ========================================================
 
-    Serial.println("MQTT reconnected");   
+    if (connectMQTT()) {
 
-    mqttReconnectAttempts = 0;
+        mqttReconnectAttempts = 0;
+        mqttRetryCyclePaused = false;
 
-    subscribeMQTTTopics(); // Після reconnect необхідно знову підписатися на топіки
+        return;
+    }
 
-    mqttClient.publish( // Публікуємо поточний стан пристрою
-        MQTT_TOPIC_STATUS,
-        "online",
-        true
-    );
+    // ========================================================
+    // ТРИ СПРОБИ ВИЧЕРПАНО
+    // ========================================================
 
-    Serial.println("Status published: online");
+    if (mqttReconnectAttempts >= MQTT_MAX_RETRIES) {
 
-    return;
+        Serial.println("MQTT: 3 attempts failed, next cycle in 60 s");
+
+        mqttRetryCycleStartTime = currentTime;
+        mqttRetryCyclePaused = true;
+    }
 }
 
-    Serial.print("MQTT reconnect failed, state: ");
-    Serial.println(mqttClient.state());
+// ============================================================
+// ПІДКЛЮЧЕННЯ ДО WI-FI
+// ============================================================
+
+bool connectWiFi() {
+
+    Serial.print("Connecting to Wi-Fi: ");
+    Serial.println(WIFI_SSID);
+
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    unsigned long startTime = millis();
+
+    while (WiFi.status() != WL_CONNECTED) {
+
+        if ((millis() - startTime) >= WIFI_TIMEOUT) { // Перевірка таймауту підключення
+
+            Serial.println();
+            Serial.println("Wi-Fi connection failed");
+
+            return false;
+        }
+
+        delay(250);
+        Serial.print(".");
+    }
+
+    Serial.println();
+    Serial.println("Wi-Fi connected");
+
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    return true;
 }
 
- // ============================================================
+// ============================================================
+// ОБСЛУГОВУВАННЯ WI-FI
+// ============================================================
+
+void wifiLoop() {
+
+    if (WiFi.status() == WL_CONNECTED) {
+
+        if (wifiReconnectInProgress) {
+
+            Serial.println("Wi-Fi reconnected");
+
+            Serial.print("IP address: ");
+            Serial.println(WiFi.localIP());
+
+            wifiReconnectInProgress = false;
+        }
+
+        return;
+    }
+
+    unsigned long currentTime = millis();
+
+    if ((currentTime - lastWiFiReconnectTime) < WIFI_RETRY_DELAY) {
+
+        return;
+    }
+
+    lastWiFiReconnectTime = currentTime;
+
+    wifiReconnectInProgress = true;
+
+    Serial.println("Wi-Fi reconnect attempt");
+
+    WiFi.reconnect();
+}
+
+// ============================================================
 // ОТРИМАННЯ ТЕМПЕРАТУРИ
 // ============================================================
 

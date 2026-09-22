@@ -27,16 +27,19 @@
 #define WIFI_PASSWORD ""             // без пароля
 #define WIFI_TIMEOUT  10000          // Час очікування підключення до WI-FI
 
+#define WIFI_RETRY_DELAY 5000 // Інтервал між спробами відновлення Wi-Fi, мс
+
 // ═══════════════════════════════════════════════════════════
 // КОНФІГУРАЦІЯ MQTT
 // ═══════════════════════════════════════════════════════════
 
-#define MQTT_BROKER    "broker.hivemq.com"   // Адреса брокера
+#define MQTT_BROKER    "broker.hivemq.c'o'm"   // Адреса брокера
 #define MQTT_PORT      1883                  // Порт брокера
 #define MQTT_CLIENT_ID "ESP32-Tregubenko-B"  // Ідентифікатор клієнта
 
 #define MQTT_RETRY_DELAY 5000 // Інтервал між спробами reconnect, мс
 #define MQTT_MAX_RETRIES 3    // Максимальна кількість спроб reconnect
+#define MQTT_RETRY_CYCLE_DELAY 60000  // Пауза після 3 невдалих спроб, мс
 
 #define MQTT_KEEPALIVE_SEC      60 // Інтервал keep-alive в секундах
 #define MQTT_SOCKET_TIMEOUT_SEC 30 // Таймаут сокета в секундах

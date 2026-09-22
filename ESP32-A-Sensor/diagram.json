@@ -23,6 +23,13 @@
         "top": 110,
         "left": -150,
         "attrs": { "color": "Green" , "bounce": "1" , "label": "Manual Read"}
+        },
+        {
+        "type": "wokwi-pushbutton",
+        "id": "btn2",
+        "top": 40,
+        "left": -150,
+        "attrs": { "color": "Red" , "bounce": "1" , "label": "Wi-Fi Disconnect"}
         }       
       ],
       "connections": [
@@ -34,7 +41,10 @@
         [ "dht1:GND", "esp:GND.1", "black", ["v0"] ],
 
         [ "btn1:1.r", "esp:D14", "green", ["v0"] ],
-        [ "btn1:2.r", "esp:GND.2", "black", ["v0"] ]
+        [ "btn1:2.r", "esp:GND.2", "black", ["v0"] ],
+
+        [ "btn2:1.r", "esp:D32", "red", ["v0"] ],
+        [ "btn2:2.r", "esp:GND.2", "black", ["v0"] ]
         
       ],
       "dependencies": {}

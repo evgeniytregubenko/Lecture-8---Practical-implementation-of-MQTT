@@ -19,6 +19,8 @@ void setup() {
 
     initActuator(); // Ініціалізація світлодіода
 
+    initMQTT(); // Ініціалізація MQTT-клієнта
+
     if (!connectWiFi()) { // Підключення до Wi-Fi
 
         Serial.println("Continue working without Wi-Fi");
@@ -38,6 +40,7 @@ void setup() {
 
 void loop() {
 
+    wifiLoop(); // Обслуговування Wi-Fi-з'єднання
     mqttLoop(); // Обслуговування MQTT-з'єднання та вхідних повідомлень
 
     actuatorLoop(); // Обслуговування неблокуючого мигання LED
