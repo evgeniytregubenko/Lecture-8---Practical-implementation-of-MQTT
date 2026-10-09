@@ -66,18 +66,32 @@ void setup() {
         sensorData.statuscheck &= ~STATUS_WIFI_ERR; // Скидання біта помилки Wi-Fi
 
         // ========================================================
-        // MQTT
+        // СИНХРОНІЗАЦІЯ ЧАСУ
         // ========================================================
 
-        if (!connectMQTT()) { // Спроба підключення до MQTT-брокера
+        if (!syncTime()) {
 
-            sensorData.statuscheck |= STATUS_MQTT_ERR; // Встановлення біта помилки MQTT
+            sensorData.statuscheck |= STATUS_MQTT_ERR;
 
+            Serial.println("Time synchronization failed");
             Serial.println("Continue working without MQTT");
 
         } else {
 
-            sensorData.statuscheck &= ~STATUS_MQTT_ERR; // Скидання біта помилки MQTT
+            // ====================================================
+            // MQTT
+            // ====================================================
+
+            if (!connectMQTT()) { // Спроба підключення до AWS IoT Core
+
+                sensorData.statuscheck |= STATUS_MQTT_ERR; // Встановлення біта помилки MQTT
+
+                Serial.println("Continue working without MQTT");
+
+            } else {
+
+                sensorData.statuscheck &= ~STATUS_MQTT_ERR; // Скидання біта помилки MQTT
+            }
         }
     }
 }

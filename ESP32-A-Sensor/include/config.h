@@ -13,19 +13,14 @@
 // КОНФІГУРАЦІЯ WI-FI
 // ═══════════════════════════════════════════════════════════
 
-#define WIFI_SSID     "Wokwi-GUEST"  // мережа Wokwi симулятора
-#define WIFI_PASSWORD ""             // без пароля
 #define WIFI_TIMEOUT  10000          // Час очікування підключення до WI-FI
-
 #define WIFI_RETRY_DELAY 5000 // Інтервал між спробами відновлення Wi-Fi, мс
 
-// ═══════════════════════════════════════════════════════════
-// КОНФІГУРАЦІЯ MQTT
-// ═══════════════════════════════════════════════════════════
+// ============================================================
+// КОНФІГУРАЦІЯ MQTT (AWS IoT Core)
+// ============================================================
 
-#define MQTT_BROKER   "broker.hivemq.com"    // Адреса брокера
-#define MQTT_PORT     1883                   // Порт брокера
-#define MQTT_CLIENT_ID "ESP32-Tregubenko-A"  // Ідентифікатор клієнта
+#define MQTT_PORT      8883
 
 #define MQTT_RETRY_DELAY  5000 // Інтервал між спробами reconnect, мс
 #define MQTT_MAX_RETRIES  3    // Максимальна кількість спроб reconnect
@@ -38,15 +33,24 @@
 // MQTT ТОПІКИ
 // ============================================================
 
-#define MQTT_TOPIC_TEMPERATURE "iot-course/Tregubenko/sensors/temperature"
-#define MQTT_TOPIC_HUMIDITY    "iot-course/Tregubenko/sensors/humidity"
-
-#define MQTT_TOPIC_COMMANDS    "iot-course/Tregubenko/commands"
-#define MQTT_TOPIC_STATUS      "iot-course/Tregubenko/status"
+#define MQTT_TOPIC_DATA     "iot-course/Tregubenko/sensors/data"
+#define MQTT_TOPIC_COMMANDS "iot-course/Tregubenko/commands"
+#define MQTT_TOPIC_STATUS   "iot-course/Tregubenko/status"
 
 // ============================================================
 // ІНТЕРВАЛИ
 // ============================================================
 
-#define SENSOR_INTERVAL 10000 // Публікація даних сенсорів кожні 10 секунд
+#define SENSOR_INTERVAL 30000 // Публікація даних сенсорів кожні 30 секунд
 #define DEBOUNCE_DELAY  50    // Debounce кнопки, мс
+
+// ============================================================
+// КОНФІГУРАЦІЯ NTP
+// ============================================================
+
+#define NTP_SERVER          "pool.ntp.org"
+#define NTP_GMT_OFFSET_SEC  0
+#define NTP_DAYLIGHT_OFFSET 0
+#define NTP_TIMEOUT         10000 // Таймаут синхронізації часу, мс
+
+#define NTP_RETRY_DELAY 10000 // Інтервал між повторними спробами синхронізації, мс

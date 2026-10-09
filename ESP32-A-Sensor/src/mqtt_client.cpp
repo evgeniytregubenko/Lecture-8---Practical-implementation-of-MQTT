@@ -1,15 +1,19 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <time.h>
+
 
 #include "config.h"
 #include "mqtt_client.h"
+#include "secrets.h"
 
 // ============================================================
 // MQTT КЛІЄНТ
 // ============================================================
 
-WiFiClient wifiClient; // TCP-клієнт для мережевого з'єднання
+WiFiClientSecure wifiClient; // TCP-клієнт для захищеного мережевого з'єднання
 
 PubSubClient mqttClient(wifiClient); // MQTT-клієнт, який використовує TCP-з'єднання wifiClient
 
@@ -19,7 +23,15 @@ PubSubClient mqttClient(wifiClient); // MQTT-клієнт, який викори
 
 void initMQTT() {
 
-    mqttClient.setServer(MQTT_BROKER, MQTT_PORT); // Адреса та порт MQTT-брокера
+    wifiClient.setCACert(AWS_CERT_CA); // Кореневий сертифікат Amazon
+
+    wifiClient.setCertificate(AWS_CERT_CRT);  //  Сертифікат пристрою ESP32
+
+    wifiClient.setPrivateKey(AWS_CERT_PRIVATE); // Приватний ключ пристрою
+
+    mqttClient.setServer(AWS_IOT_ENDPOINT, MQTT_PORT); // AWS IoT Core endpoint, порт 8883
+
+    mqttClient.setBufferSize(512); // Розмір буфера MQTT для JSON-повідомлень
 
     mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC); // Інтервал MQTT Keep Alive
 
@@ -46,7 +58,18 @@ static bool mqttRetryCyclePaused = false; // Ознака паузи після 
 // ============================================================
 
 static unsigned long lastWiFiReconnectTime = 0;
+
 static bool wifiReconnectInProgress = false; // Ознака процесу відновлення Wi-Fi
+
+// ============================================================
+// ЗМІННІ ДЛЯ СИНХРОНІЗАЦІЇ ЧАСУ
+// ============================================================
+
+static bool timeSynchronized = false;  //  
+
+static unsigned long lastTimeSyncAttempt = 0;  //  
+
+
 
 // ============================================================
 // ПІДКЛЮЧЕННЯ ДО WI-FI
@@ -133,21 +156,73 @@ void wifiLoop() {
 }
 
 // ============================================================
+// СИНХРОНІЗАЦІЯ ЧАСУ ЧЕРЕЗ NTP
+// ============================================================
+
+bool syncTime() {
+
+    Serial.println("Synchronizing time...");
+
+    configTime(
+        NTP_GMT_OFFSET_SEC,
+        NTP_DAYLIGHT_OFFSET,
+        NTP_SERVER
+    );
+
+    struct tm timeInfo;
+    unsigned long startTime = millis();
+
+    while (!getLocalTime(&timeInfo)) {
+
+        if (millis() - startTime >= NTP_TIMEOUT) {
+
+            Serial.println("Time synchronization failed");
+
+            timeSynchronized = false;
+
+            return false;
+        }
+
+        delay(100);
+    }
+
+    timeSynchronized = true;
+
+    Serial.println("Time synchronized");
+
+    Serial.print("Current time: ");
+    Serial.println(&timeInfo, "%Y-%m-%d %H:%M:%S");
+
+    return true;
+}
+
+// ============================================================
 // ПІДКЛЮЧЕННЯ ДО MQTT
 // ============================================================
 
 bool connectMQTT() {
 
-    Serial.println("Connecting to MQTT broker...");
+    if (WiFi.status() != WL_CONNECTED) { // MQTT-підключення неможливе без Wi-Fi
 
-    if (mqttClient.connect(MQTT_CLIENT_ID)) { // Одна спроба підключення до MQTT-брокера
+        return false;
+    }
+
+    if (!timeSynchronized) { // TLS-підключення до AWS виконуємо тільки після синхронізації часу
+
+        Serial.println("MQTT connection skipped: time is not synchronized");
+
+        return false;
+    }
+
+    Serial.println("Connecting to AWS IoT Core...");
+
+    if (mqttClient.connect(THINGNAME)) { // Підключення до AWS IoT Core з використанням Thing Name як Client ID
 
         Serial.println("MQTT connected");
 
         return true;
     }
 
-    // Виведення коду помилки MQTT
     Serial.print("MQTT connection failed, state: ");
     Serial.println(mqttClient.state());
 
@@ -161,6 +236,24 @@ bool connectMQTT() {
 void mqttLoop() {
 
     if (WiFi.status() != WL_CONNECTED) { // Якщо Wi-Fi не підключений, MQTT reconnect неможливий
+
+        return;
+    }
+
+    // ========================================================
+    // ПЕРЕВІРКА СИНХРОНІЗАЦІЇ ЧАСУ
+    // ========================================================
+
+    if (!timeSynchronized) {
+
+        unsigned long currentTime = millis();
+
+        if (currentTime - lastTimeSyncAttempt >= NTP_RETRY_DELAY) {
+
+            lastTimeSyncAttempt = currentTime;
+
+            syncTime();
+        }
 
         return;
     }
@@ -216,6 +309,9 @@ void mqttLoop() {
     // СПРОБА ПОВТОРНОГО ПІДКЛЮЧЕННЯ
     // ========================================================
 
+    // Закриваємо попереднє TLS-з'єднання перед новою спробою
+    wifiClient.stop();
+    
     if (connectMQTT()) {
 
         mqttReconnectAttempts = 0;
@@ -250,43 +346,29 @@ bool publishSensorData(const SensorData &data) {
         return false;
     }
 
-    // Буфери для перетворення числових значень у текст
-    char temperatureBuffer[16];
-    char humidityBuffer[16];
+    char payload[256]; // Буфер для формування JSON-повідомлення
 
-    snprintf(   // Перетворення температури у текстовий формат
-        temperatureBuffer,
-        sizeof(temperatureBuffer),
-        "%.2f",
-        data.dht.temperature
-    );
+    time_t currentTimestamp = time(nullptr); // Отримуємо поточний Unix timestamp
 
-    snprintf( // Перетворення вологості у текстовий формат
-        humidityBuffer,
-        sizeof(humidityBuffer),
-        "%.2f",
+    snprintf(
+        payload,
+        sizeof(payload),
+        "{\"device_id\":\"%s\",\"timestamp\":%ld,\"temperature\":%.2f,\"humidity\":%.2f}",
+        THINGNAME,
+        (long)currentTimestamp,
+        data.dht.temperature,
         data.dht.humidity
     );
 
-    bool temperaturePublished = mqttClient.publish( // Публікація температури
-        MQTT_TOPIC_TEMPERATURE,
-        temperatureBuffer
+    bool published = mqttClient.publish( // Публікація JSON у єдиний топік sensors/data
+        MQTT_TOPIC_DATA,
+        payload
     );
 
-    bool humidityPublished = mqttClient.publish( // Публікація вологості
-        MQTT_TOPIC_HUMIDITY,
-        humidityBuffer
-    );
+    if (published) {
 
-    if (temperaturePublished && humidityPublished) { // Перевірка результату публікації
-
-        Serial.print("Published. Time: ");
-        Serial.print(data.timestamp / 1000);
-        Serial.print(" s | Temperature: ");
-        Serial.print(temperatureBuffer);
-        Serial.print(" C | Humidity: ");
-        Serial.print(humidityBuffer);
-        Serial.println(" %");
+        Serial.print("Published: ");
+        Serial.println(payload);
 
         return true;
     }
