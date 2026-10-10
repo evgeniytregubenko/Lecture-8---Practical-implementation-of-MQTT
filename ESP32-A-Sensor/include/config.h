@@ -48,6 +48,7 @@
 // КОНФІГУРАЦІЯ NTP
 // ============================================================
 
+//#define NTP_SERVER          "invalid.ntp.test" // Використовуємо недійсний NTP-сервер для тестування таймауту
 #define NTP_SERVER          "pool.ntp.org"
 #define NTP_GMT_OFFSET_SEC  0
 #define NTP_DAYLIGHT_OFFSET 0

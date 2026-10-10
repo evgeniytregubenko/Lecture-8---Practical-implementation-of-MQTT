@@ -159,9 +159,27 @@ void wifiLoop() {
 // СИНХРОНІЗАЦІЯ ЧАСУ ЧЕРЕЗ NTP
 // ============================================================
 
+// Тестування відмови NTP
+//int ntpTestAttempts = 0;
+
 bool syncTime() {
 
     Serial.println("Synchronizing time...");
+
+    // ========================================================
+    // ТЕСТ: ІМІТАЦІЯ ДВОХ ПОМИЛОК NTP
+    // ========================================================
+
+    //if (ntpTestAttempts < 2) {
+
+    //    ntpTestAttempts++;
+
+    //     Serial.println("TEST: NTP synchronization failed");
+
+    //    timeSynchronized = false;
+
+    //    return false;
+    //}
 
     configTime(
         NTP_GMT_OFFSET_SEC,
@@ -308,6 +326,16 @@ void mqttLoop() {
     // ========================================================
     // СПРОБА ПОВТОРНОГО ПІДКЛЮЧЕННЯ
     // ========================================================
+
+    // ========================================================
+    // ДІАГНОСТИКА ПІДКЛЮЧЕННЯ
+    // ========================================================
+
+    //Serial.print("Wi-Fi status before MQTT reconnect: ");
+    //Serial.println(WiFi.status());
+
+    //Serial.print("MQTT connected before reconnect: ");
+    //Serial.println(mqttClient.connected());
 
     // Закриваємо попереднє TLS-з'єднання перед новою спробою
     wifiClient.stop();

@@ -20,7 +20,23 @@ void initSensors() {
 
 }
 
+// Тестування помилок DHT22
+//int dhtTestAttempts = 0;
+
 bool readDHT(DHTData &data) {
+
+    // ========================================================
+    // ТЕСТ: ІМІТАЦІЯ ДВОХ ПОМИЛОК DHT22
+    // ========================================================
+
+    //if (dhtTestAttempts < 2) {
+
+    //    dhtTestAttempts++;
+
+    //    Serial.println("TEST: DHT22 read failed");
+
+    //    return false;
+    //}
 
     float humidity = dht.readHumidity(); // Зчитування вологості з сенсора DHT22
     float temperature = dht.readTemperature(); // Зчитування температури з сенсора DHT22
